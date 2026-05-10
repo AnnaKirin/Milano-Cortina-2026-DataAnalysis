@@ -1,0 +1,16 @@
+venue,venue_code,disciplines,disciplines_code,url_sport,url_venue
+Anterselva Biathlon Arena,ABA,discipline-biathlon,BTH,https://www.olympics.com/en/sports/biathlon/,https://www.olympics.com/en/milano-cortina-2026/venues/anterselva-biathlon-arena
+Cortina Curling Olympic Stadium,CCU,discipline-curling,CUR,https://www.olympics.com/en/sports/curling/,https://www.olympics.com/en/milano-cortina-2026/venues/cortina-curling-olympic-stadium
+Cortina Sliding Centre,CSC,"[""discipline-bobsleigh"",""discipline-luge"",""discipline-skeleton""]","[""BOB"",""LUG"",""SKN""]",,https://www.olympics.com/en/milano-cortina-2026/venues/cortina-sliding-centre
+Livigno Aerials & Moguls Park,LAM,discipline-freestyle-skiing,FRS,https://www.olympics.com/en/sports/freestyle-skiing/,https://www.olympics.com/en/milano-cortina-2026/venues/livigno-aerials-moguls-park
+Livigno Snow Park,LSP,"[""discipline-freestyle-skiing"",""discipline-snowboard""]","[""FRS"",""SBD""]",,https://www.olympics.com/en/milano-cortina-2026/venues/livigno-snow-park
+Milano Ice Skating Arena,MSK,"[""discipline-figure-skating"",""discipline-short-track-speed-skating""]","[""FSK"",""STK""]",,https://www.olympics.com/en/milano-cortina-2026/venues/milano-ice-skating-arena
+Milano San Siro Olympic Stadium,MOS,,,,https://www.olympics.com/en/milano-cortina-2026/venues/milano-san-siro-olympic-stadium
+Milano Santagiulia Ice Hockey Arena,MH1,discipline-ice-hockey,IHO,https://www.olympics.com/en/sports/ice-hockey/,https://www.olympics.com/en/milano-cortina-2026/venues/milano-santagiulia-ice-hockey-arena
+Milano Speed Skating Stadium,MSS,discipline-speed-skating,SSK,https://www.olympics.com/en/sports/speed-skating/,https://www.olympics.com/en/milano-cortina-2026/venues/milano-speed-skating-stadium
+Milano Rho Ice Hockey Arena,MH2,discipline-ice-hockey,IHO,https://www.olympics.com/en/sports/ice-hockey/,https://www.olympics.com/en/milano-cortina-2026/venues/milano-rho-ice-hockey-arena
+Predazzo Ski Jumping Stadium,PSJ,"[""discipline-nordic-combined"",""discipline-ski-jumping""]","[""NCB"",""SJP""]",,https://www.olympics.com/en/milano-cortina-2026/venues/predazzo-ski-jumping-stadium
+Stelvio Ski Centre,SSC,"[""discipline-alpine-skiing"",""discipline-ski-mountaineering""]","[""ALP"",""SMT""]",,https://www.olympics.com/en/milano-cortina-2026/venues/stelvio-ski-centre
+Tesero Cross-Country Skiing Stadium,TCC,"[""discipline-cross-country-skiing"",""discipline-nordic-combined""]","[""CCS"",""NCB""]",,https://www.olympics.com/en/milano-cortina-2026/venues/tesero-cross-country-skiing-stadium
+Tofane Alpine Skiing Centre,CAL,discipline-alpine-skiing,ALP,https://www.olympics.com/en/sports/alpine-skiing/,https://www.olympics.com/en/milano-cortina-2026/venues/tofane-alpine-skiing-centre
+Verona Olympic Arena,VOA,,,,https://www.olympics.com/en/milano-cortina-2026/venues/verona-olympic-arena
