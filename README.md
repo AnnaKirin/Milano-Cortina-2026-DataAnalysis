@@ -1,188 +1,231 @@
-# Milano-Cortina-2026-DataAnalysis
+# Milano-Cortina 2026 Olympic Winter Games: Data Analysis & Insights
+This document is licensed under CC BY 4.0.
+## Table of Contents
 
-This analysis uncovers several "fun facts" about the Milano-Cortina 2026 Olympic Winter Games by querying athlete,
-medallist, session, venue, and event data. Using DuckDB, I cleaned inconsistencies with string functions and CASE WHEN
-bucketing, then joined multiple files to surface non‑trivial insights from session timing patterns to host‑nation
-performance dynamics. Below are the several discoveries, each derived directly from SQL. Although six files were
-provided, only three of them (schedules.csv, medallists.csv, and athletes.csv) were used in this analysis.
+<!-- TOC -->
 
-## Data Ingestion and ETL
+* [1. Introduction](#1-introduction)
+* [2. Project Setup & Execution](#2-project-setup--execution)
+    * [Prerequisites](#prerequisites)
+    * [DuckDB Execution Workflow](#duckdb-execution-workflow)
+* [3. Data Ingestion and ETL](#3-data-ingestion-and-etl)
+    * [Data selection and analytical Assumptions](#data-selection-and-analytical-assumptions)
+    * [Primary key strategy and initial base ingestion](#primary-key-strategy-and-initial-base-ingestion)
+    * [Foreign key mapping](#foreign-key-mapping)
+    * [Data Cleansing](#data-cleansing)
+    * [JSON parsing](#json-parsing)
+* [4. Analysis and Results](#4-analysis-and-results)
+    * [QUERY 1 – Session Distribution by Time Slot and Type](#query-1--session-distribution-by-time-slot-and-type)
+        * [Query Design and Logic](#query-design-and-logic)
+        * [Results and Interpretation](#results-and-interpretation)
+        * [Key Insights](#key-insights)
+    * [QUERY 2 – Venue Performance by Country Group](#query-2--venue-performance-by-country-group)
+        * [Query Design and Logic](#query-design-and-logic-1)
+        * [Results and Interpretation](#results-and-interpretation-1)
+        * [Key Insights](#key-insights-1)
+    * [QUERY 3 – Top Performing Country per Venue](#query-3--top-performing-country-per-venue)
+        * [Query Design and Logic](#query-design-and-logic-2)
+        * [Results and Interpretation](#results-and-interpretation-2)
+        * [Key Insights](#key-insights-2)
+* [5. Discussion of Findings](#5-discussion-of-findings)
+    * [Key Patterns Across Queries](#key-patterns-across-queries)
+    * [Host Nation vs Regional Advantage](#host-nation-vs-regional-advantage)
+    * [Sport Structure Effects (Team vs Individual Bias)](#sport-structure-effects-team-vs-individual-bias)
+* [6. Conclusion](#6-conclusion)
+    * [Main Takeaways](#main-takeaways)
+    * [Limitations](#limitations)
+    * [Final Remarks](#final-remarks)
+* [Appendix A – Personal Reflection on Analytical Process](#appendix-a--personal-reflection-on-analytical-process)
 
-1. Data discovery and selection
-   Analyzed the raw CSV data files to assess their structure and selected the target source tables required for the
-   schema development.
+<!-- TOC -->
 
-2. Primary key strategy and initial base ingestion
-    * Formulated a strategy to enforce relational integrity in the `schedules_raw` table by generating a unique primary
-      key utilizing a database sequence (`id_schedules_sequence`).
-    * Initialized the physical schema structure using `CREATE TABLE` DDL statements.
-    * Populated the table using dynamic `INSERT INTO` execution, parameterizing the file source path
-      variable while explicitly defining the delimiter and accounting for header rows.
-    * Eliminated duplicate records at the ingestion stage by leveraging `SELECT DISTINCT` filters.
+## 1. Introduction
 
-3. Foreign key mapping
-    * Replicated the ingestion methodology for the `medallists_raw` table, establishing a relational integrity
-      constraint by referencing the `schedules_raw` primary key as a Foreign Key.
-    * Populated this table with raw athlete medal data.
-    * Implemented an `INNER JOIN` to accurately map the `schedule_id` and restrict records exclusively to medal-awarding
-      events. The join predicates enforced string normalization (trimming whitespace and executing case-insensitive
-      matching), exact date synchronization, and a boolean condition filtering strictly for medal-awarding criteria.
-    * Constructed the third core relation, `athletes`, from the source `athletes.csv`.
+This analysis explores the structural, logistical, and competitive patterns of the Milano–Cortina 2026 Olympic Winter
+Games. The goal is not just to describe outcomes, but to understand how scheduling decisions, venue distribution, and
+competition formats shape the final medal landscape.
 
-4. Data Cleansing
+The dataset is processed using DuckDB as the core analytical engine. A full ETL pipeline is implemented to clean,
+standardize, and connect relational data across event schedules, athlete information, and medal results.
 
-   The first optimization creates the schedules_cleaned view. A view was chosen over a temporary table because it
-   provides dynamic, real-time access to the most up-to-date raw data without consuming physical storage or persisting
-   across a single database session.
-    * Time Categorization: Derives a time_slot ('Morning', 'Afternoon', 'Evening', 'Night') based on the event's start
-      hour.
-    * Session Type Classification: Categorizes events as either a 'Medal Session' or 'Non-Medal' by evaluating the
-      event_medal column (safely treating NULL values as 0).
-    * String Standardization: Aligns columns (discipline, event, phase, venue) by trimming whitespace and converting
-      codes (
-      discipline_code, event_type) to uppercase.
-    * Data Parsing: Cleans the location field by extracting the substring after a hyphen if one exists, and strips all
-      hyphens from the id field using regex.
-    * Aliasing: Renames "day" to event_date, event to event_name, and phase to event_phase.
+The analysis focuses on three main perspectives:
 
-   The second optimization establishes the medallists_cleaned view to standardize competitor and awards data.
-    * String Normalization: Converts high-cardinality text fields (name, country_code, medal, discipline_code) to
-      uppercase and strips trailing/leading whitespaces.
-    * Semantic Renaming: Aliases the ambiguous "date" column to award_date for better contextual clarity.
+* how competition sessions are distributed across time and structure
+* how medal outcomes vary across venues and country groupings
+* how dominance changes depending on sport format and aggregation level
 
-5. JSON parsing
-    * The third view `athletes_cleaned` was created and data cleansing executed on unstructured attributes by utilizing
-      the `UNNEST` function to expand array
-      structures into discrete rows.
-    * Sanitized string anomalies by converting single quotes to double quotes to guarantee valid JSON validation,
-      resolving embedded quote conflicts, casting the resulting text into formal JSON object structures, and extracting
-      targeted object attributes as standard text fields.
+Overall, the project aims to show how seemingly simple questions like “who performed best” or “which country dominated”
+depend heavily on how the data is structured and interpreted.
 
-## Data Transformation & Execution
+## 2. Project Setup & Execution
 
-Below are some important notes on how the raw data was interpreted and used:
-This analysis compares the total number of physical medals awarded per athlete and per country. The same logic applies
-to team sports; for instance, if the Polish men's volleyball team wins gold, each of the 12 players receives a physical
+### Prerequisites
+
+* DuckDB: Ensure the DuckDB CLI is installed and available in your system PATH.
+* Data Sources: Raw CSV files must be located in the directory specified in the script’s configuration variables.
+
+### DuckDB Execution Workflow
+
+The entire ETL pipeline and analytical workflow is implemented in a single, self-contained SQL script.
+To execute data transformations, schema creation, and analytical queries, run the script directly from the command line
+using DuckDB:
+
+```bash
+duckdb < analysis.sql
+```
+
+## 3. Data Ingestion and ETL
+
+### Data selection and analytical assumptions
+
+Analyzed the raw CSV data files to assess their structure and selected the target source tables required for the
+schema development. While the primary dataset comprised six source files, this specific investigation targets the three
+relations:
+`schedules.csv`, `medallists.csv`, and `athletes.csv`.
+
+This analysis compares the total number of physical medals awarded per athlete and per country. For instance, if the
+Polish men's volleyball team wins gold, each of the 12 players receives a physical
 medal, but the official Olympic medal table only credits Poland with a single gold medal. Consequently, these metrics
 track the absolute count of physical medals distributed rather than the standard country medal rankings. Therefore,
 these results cannot be compared with the data contained in the medals.csv file.
 
+### Primary key strategy and initial base ingestion
+
+* Formulated a strategy to enforce relational integrity in the `schedules_raw` table by generating a unique primary
+  key utilizing a database sequence (`id_schedules_sequence`).
+* Initialized the physical schema structure using `CREATE TABLE` DDL statements.
+* Populated the table using dynamic `INSERT INTO` execution, parameterizing the file source path
+  variable while explicitly defining the delimiter and accounting for header rows.
+* Eliminated duplicate records at the ingestion stage by leveraging `SELECT DISTINCT` filters.
+
+### Foreign key mapping
+
+* Replicated the ingestion methodology for the `medallists_raw` table, establishing a relational integrity
+  constraint by referencing the `schedules_raw` primary key as a Foreign Key.
+* Populated this table with raw athlete medal data.
+* Implemented an `INNER JOIN` to accurately map the `schedule_id` and restrict records exclusively to medal-awarding
+  events. The join predicates enforced string normalization (trimming whitespace and executing case-insensitive
+  matching), exact date synchronization, and a boolean condition filtering strictly for medal-awarding criteria.
+* Constructed the third core relation, `athletes`, from the source `athletes.csv`.
+
+### Data Cleansing
+
+The first optimization creates the schedules_cleaned view. A view was chosen over a temporary table because it
+provides dynamic, real-time access to the most up-to-date raw data without consuming physical storage or persisting
+across a single database session.
+
+* Time Categorization: Derives a time_slot ('Morning', 'Afternoon', 'Evening', 'Night') based on the event's start
+  hour.
+* Session Type Classification: Categorizes events as either a 'Medal Session' or 'Non-Medal' by evaluating the
+  event_medal column (safely treating NULL values as 0).
+* String Normalization: Aligns columns (discipline, event, phase, venue) by trimming whitespace and converting
+  codes (discipline_code, event_type) to uppercase.
+* Data Parsing: Cleans the location field by extracting the substring after a hyphen if one exists, and strips all
+  hyphens from the id field using regex.
+* Aliasing: Renames "day" to event_date, event to event_name, and phase to event_phase.
+
+The second optimization establishes the medallists_cleaned view to standardize competitor and awards data.
+
+* String Normalization: Converts text fields (name, country_code, medal, discipline_code) to
+  uppercase and strips trailing/leading whitespaces.
+* Aliasing: Aliases the "date" column to award_date for better contextual clarity.
+
+### JSON parsing
+
+* The third view athletes_cleaned was created as an exploratory transformation step to practice handling nested and
+  semi-structured data. It was not used directly in the final analytical queries but served to validate the JSON parsing
+  workflow.
+* The process involved expanding array structures into discrete rows using the `UNNEST` function, sanitizing string
+  anomalies by converting single quotes to double quotes to ensure valid JSON formatting, resolving embedded quote
+  conflicts, casting the cleaned strings into formal JSON objects, and extracting targeted attributes as standard
+  fields.
+
+## 4. Analysis and Results
+
 ### QUERY 1 – Session Distribution by Time Slot and Type
 
-This analysis breaks down how competition sessions are distributed across time slots — Morning, Afternoon, and Evening —
-and by session type, distinguishing Medal Sessions from Non-Medal events. For each combination, the query reports the
-number of sessions, the spread across unique venues, the range of disciplines involved, and each group's share of total
-sessions within its time slot.
+#### Query Design and Logic
 
-`GROUPING SETS` produces intermediate subtotals per time slot alone and per session type alone, surfacing in the result
-as `Time-slot metrics` rows. This
-makes it possible to read both granular splits and rolled-up totals from the same result set without a separate
-aggregation pass.
+This analysis examines how competition sessions are distributed across three time slots (Morning, Afternoon, Evening)
+and two session types (Medal vs Non-Medal). For each combination, the query returns session counts, venue diversity,
+discipline coverage, and relative share within each time slot.
 
-The priority flag adds an interpretive layer — Medal Sessions are marked as high value, Non-Medal as regular — making it
-straightforward to assess not just when sessions are concentrated, but whether the most consequential sessions are
-scheduled at times that maximize audience and operational reach.
+`GROUPING SETS` is used to generate both granular and aggregated views within a single result set, enabling comparisons
+across time slots and session types without additional aggregation steps. This allows consistent evaluation of both
+detailed and rolled-up scheduling patterns.
+
+A priority flag is applied to distinguish Medal Sessions (high-value events) from Non-Medal Sessions (supporting
+events), enabling interpretation of scheduling structure in terms of competitive significance.
+
+#### Results and Interpretation
+
+The overall schedule is heavily weighted toward Non-Medal Sessions, which account for **79.65%** (497 sessions),
+compared to **20.35%** (127 sessions) for Medal Sessions.
+
+Temporal distribution shows a clear concentration of activity in the afternoon, which records the highest total number
+of sessions and venue utilization. The breakdown across time slots is as follows:
+
+- **Morning:** 172 sessions
+    - 156 Non-Medal (90.7%)
+    - 16 Medal (9.3%)
+    - 8 venues, 5 disciplines
+
+- **Afternoon:** 257 sessions
+    - 69 Medal (26.85%)
+    - 15 venues, 12 disciplines
+    - Highest operational load and highest diversity of medal events
+
+- **Evening:** 195 sessions
+    - 42 Medal (21.54%)
+    - 9 venues, 11 disciplines
+    - More concentrated venue usage with sustained medal presence
+
+Comparatively, the afternoon represents the peak operational period, combining high session volume with the greatest
+venue and discipline diversity. The morning is structurally oriented toward preliminary rounds, while the evening
+consolidates activity into fewer venues while maintaining a meaningful share of medal events.
+
+#### Key Insights
+
+- **Venue utilization:** The afternoon reaches maximum infrastructure usage (21 concurrent venues across session types),
+  indicating peak operational demand.
+- **Discipline spread:** Medal events are most diverse in the afternoon, spanning 12 disciplines simultaneously.
+- **Scheduling structure:** Medal Sessions are systematically concentrated in later time slots, aligning high-value
+  events with periods of higher overall activity.
+- **Resource prioritization:** The classification system clearly separates high-value (Medal) from support events,
+  enabling scheduling optimization for broadcast and operational planning.
 
 ### QUERY 2 – Venue Performance by Country Group
 
-This query analyzes medal distribution across competition venues by comparing three geopolitical groupings: Italy (the
-host nation), Alpine States (neighboring countries with similar winter sports traditions), and Other Countries. The
-analysis is restricted to medal sessions only, ensuring that only podium‑deciding events are considered.
+#### Query Design and Logic
 
-The query proceeds in two stages. First, a venue_performance CTE aggregates medals won, gold medals, and
-distinct athletes per venue and country group. Second, a `venue_totals` CTE computes total medals
-awarded and total athletes competing at each venue.
+This query evaluates medal distribution at the venue level by comparing three country groupings: Italy (host nation),
+Alpine States (geographically and competitively proximate winter-sport nations, which are Switzerland, Germany, Austria,
+France, Slovenia, Liechtenstein, Monaco), and Other Countries. The analysis is
+restricted to medal sessions to ensure that only podium-deciding events are included.
 
-The final `SELECT` then calculates three performance metrics:
+The query is implemented in two aggregation stages. A `venue_performance` CTE computes medals, gold medals, and distinct
+athletes per venue and country group. A second `venue_totals` CTE calculates total medals awarded and total athlete
+participation per venue, enabling normalization across differently sized delegations.
 
-* Percentage of venue medals (`pct_of_venue_medals`): Each group's share of all medals awarded at a given venue,
-  expressed
-  as a percentage.
-* Performance Index: A ratio comparing the group's actual medal share to its expected medal share based on athlete
-  participation. A value > 1.0 indicates overperformance (more medals than athlete presence predicts); < 1.0 signals
-  underperformance. This metric controls for varying numbers of athletes per group across venues.
-* Gold Rate (`gold_rate_pct`): The proportion of the group's medals at that venue that were gold, serving as a proxy for
-  medal quality and competitive dominance.
+The final output derives three key metrics:
 
-Results are sorted first by venue name, then by a custom priority order placing Italy first, Alpine
-States second, and Other Countries third, facilitating direct comparison of host vs. neighbors vs. rest of the world at
-each competition site.
+- **Medal Share (`pct_of_venue_medals`)**: Proportion of total medals at a venue won by each country group.
+- **Performance Index**: Ratio of observed medal share to expected share based on athlete participation. Values above
+  1.0 indicate overperformance, while values below 1.0 indicate underperformance.
+- **Gold Rate (`gold_rate_pct`)**: Share of medals converted into gold, used as a proxy for competitive dominance.
 
-### QUERY 3 – Top Performing Country per Venue
+Results are ordered by venue and a fixed country-group priority (Italy → Alpine States → Other Countries), enabling
+consistent cross-venue comparison of host, regional, and global performance patterns.
 
-This query identifies the nation achieving the highest medal volume at each competition venue, explicitly
-differentiating between singular dominance and competitive ties.
+#### Results and Interpretation
 
-The query executes in three logical stages:
+The results indicate that a pure host-nation advantage is not consistently present. Italy shows localized
+overperformance at select venues but underperforms elsewhere, while Alpine States display more stable gains across
+technically demanding mountain disciplines.
 
-* medalsPerLocation CTE: Aggregates total medals won by venue, country, and event type. Each medal counts equally toward
-  the total, reflecting overall podium presence rather.
-
-* countries_rank CTE: Applies `DENSE_RANK()` partitioned by venue, ordering by total medals descending. Countries with
-  identical medal counts receive the same rank. The use of `DENSE_RANK()` ensures that ties
-  produce consecutive rankings without gaps, while still allowing all co‑leaders to be identified as rank = 1.
-
-* top_countries CTE: Filters to only countries achieving rank 1 at their respective venues. This step retains all tied
-  nations when multiple share the top medal count.
-
-The outer query adds a `leadership_status` column using a windowed `COUNT(*) OVER (PARTITION BY venue)`. If
-more than one row exists for a venue (i.e., multiple countries share the top medal count), the status is labeled 'Tied';
-otherwise, it is 'Sole Leader'. Results are ordered by event type and then by total medals descending, allowing
-to observe which disciplines tend toward single‑nation dominance versus competitive parity.
-
-## Key Findings
-
-This chapter presents the key findings derived from each query, revealing several "fun facts" about the Milano-Cortina
-2026 Olympic Winter Games through systematic analysis of athletes, medallists, and session data. The following
-subsections
-detail the insights obtained from each of the three analytical queries.
-
-### Query 1 results
-
-An analysis of the first dataset reveals that the competition schedule is heavily weighted toward non-medal sessions,
-which account for approximately **79.65%** of the total event count (497 sessions). In contrast, medal-awarding sessions
-represent **20.35%** (127 sessions) of the global schedule.
-
-Temporally, the competition volume peaks during the afternoon, which handles the largest share of both total sessions
-and unique venue operations. Conversely, morning blocks are primarily reserved for preliminary, non-medal rounds.
-The morning contains a total of 172 sessions, meaning it is heavily skewed toward preliminary
-rounds. Non-medal sessions dictate **90.7%** (156 sessions) of this block. Only 16 medal sessions occur in the morning,
-representing just **9.3%** of the morning's schedule. These finals are highly concentrated, utilizing only 8 unique
-venues and spanning 5 disciplines.
-
-The afternoon is the most active period of the schedule, capturing 257 total sessions. It serves as the primary window
-for high-value events, hosting **69 medal sessions**, which
-constitute **26.85%** of the afternoon's programmatic inventory. This block maximizes logistics, spreading operations
-across 15 unique venues and 12 distinct disciplines.
-
-The evening block concentrates activity into fewer venues. It displays a
-strong density of high-value finals, with **42 medal sessions** making up *
-*21.54%** of the evening schedule. These events are structurally consolidated, operating across 9 unique venues, but
-maintaining a wide disciplinary breadth (11 disciplines).
-
-**Operational and Logistical Insights**
-: Venue Utilization Balance: Non-medal events show broad spatial distribution, peaking at 23 unique venues globally.
-  When evaluating specific time-slots, venue operations reach their maximum ceiling in the afternoon (21 unique venues
-  active across all session types), reflecting peak logistical demand for staff, broadcasting, and security
-  infrastructure.
-: Discipline Diversity: The diversity of sports disciplines peaks uniformly across the afternoon and evening time
-  blocks. The afternoon medal sessions feature the highest variety, involving 12 separate sports disciplines
-  simultaneously competing for podium finishes.
-: Prioritization Mapping: The dataset successfully categorizes resource allocation using a dual-tier priority
-  framework. All rows explicitly designated as a "Medal Session" map to a **High Value** priority tier, providing clear
-  data signals for broadcast scheduling and premium resource provisioning.
-
-### Query 2 results
-
-Evidence for a pure host-nation advantage is mixed, while regional Alpine familiarity appears consistently important.
-Italy does not dominate across the board, it
-punches above its participation weight at select venues while underperforming at others. The more consistent story is
-that Alpine States collectively outperform their participation share at technically demanding mountain venues,
-suggesting regional familiarity matters more than strict host-nation status.
-
-Italy shows a genuine performance index above 1.0 at only a handful of venues (Table 1). At Tofane, Italy wins more than
-its athlete share predicts and converts two-thirds of those medals to gold. It is the clearest expression of home
-advantage in the entire dataset.
+Italy records a performance index above 1.0 at a limited number of venues, indicating selective rather than systemic
+advantage. The strongest example is Tofane, where Italy exceeds its expected medal share and converts a high proportion
+of those medals into gold, representing its clearest home-field effect.
 
 | Venue                       | Performance Index | Gold Rate | Notes                       |
 |-----------------------------|-------------------|-----------|-----------------------------|
@@ -190,77 +233,115 @@ advantage in the entire dataset.
 | Cortina Sliding Centre      | 1.17              | 36.36%    | Solid, high gold rate       |
 | Livigno Snow Park-Cross     | 1.18              | 20.0%     | Above expectation           |
 
-Table 1 – Italy (Host) over-performance
+Table 1 – Italy (host nation) over-performance
 
-However, on the other venues the picture reverses sharply (Table 2). Stelvio is the most damaging result for the home
-advantage thesis — an Italian alpine skiing venue where Italy captures only 11% of medals with a performance index well
-below 1.0.
+In contrast, several venues show clear underperformance, weakening the argument for a systematic home advantage. At
+Stelvio, Italy’s medal share drops significantly below expectation, while similar patterns appear in biathlon and
+cross-country skiing venues dominated by non-host competitors.
 
-|             Venue            | Performance Index |                   Notes                   |
-|:----------------------------:|:-----------------:|:-----------------------------------------:|
-| Stelvio Ski Centre-Alpine Skiing Course           | 0.67              | Significant underperformance on home snow |
-| Anterselva Biathlon Arena    | 0.75              | Dominated by Alpine States                |
-| Tesero Cross-Country Stadium | 0.81              | Other Countries take 70.83%               |
+|                  Venue                  | Performance Index | Gold Rate |                   Notes                   |
+|:---------------------------------------:|:-----------------:|:---------:|:-----------------------------------------:|
+| Stelvio Ski Centre-Alpine Skiing Course | 0.67              | 0.0%      | Significant underperformance on home snow |
+|        Anterselva Biathlon Arena        | 0.75              | 20.0%     | Dominated by Alpine States                |
+|      Tesero Cross-Country Stadium       | 0.81              | 0.0%      | Other Countries take 70.83%               |
 
-Table 2 – Italy (Host) under-performance
 
-Alpine neighbors are the more structurally advantaged group across mountain disciplines. Unlike Italy's selective edges,
-their overperformance is spread consistently across venue types — from biathlon to sliding to ice hockey (Table 3). The
-ice hockey arena result deserves particular attention. Alpine States record the single highest performance index of any
-group at any venue 1.38, yet convert none of those medals to gold. This is the clearest example in the dataset of
-volume without dominance.
-At Anterselva and Stelvio, the story is more straightforward — high index combined with strong gold rates confirms that
-Alpine States used well their regional familiarity with geography and snow profiles.
 
-| Venue                               | Medal Share | Performance Index | Gold Rate | Reading                              |
-|:------------------------------------|:-----------:|:-----------------:|:---------:|--------------------------------------|
-| Anterselva Biathlon Arena           | 43.33%      | 1.30              | 57.69%    | High volume and high quality         |
-| Milano Santagiulia Ice Hockey Arena | 20.63%      | 1.38              | 0.0%      | Highest index in dataset, zero golds |
+Table 2 – Italy (host nation) under-performance
+
+The Alpine States group shows a more consistent pattern of overperformance across multiple venues, particularly in snow
+and ice disciplines requiring environmental familiarity. Unlike Italy’s localized gains, their advantage is distributed
+across several competition types, suggesting structural rather than situational strength.
+
+A notable anomaly appears at the ice hockey arena, where Alpine States achieve the highest performance index in the
+dataset but fail to convert this into gold medals, indicating high participation impact without top-tier conversion
+efficiency.
+
+|                  Venue                  | Medal Share | Performance Index | Gold Rate |                 Notes                |
+|:---------------------------------------:|:-----------:|:-----------------:|:---------:|:------------------------------------:|
+| Anterselva Biathlon Arena               | 43.33%      | 1.30              | 57.69%    | High volume and high quality         |
+| Milano Santagiulia Ice Hockey Arena     | 20.63%      | 1.38              | 0.0%      | Highest index in dataset, zero golds |
 | Stelvio Ski Centre-Alpine Skiing Course | 72.22%      | 1.24              | 38.46%    | Controls the venue outright          |
-| Tofane Alpine Skiing Centre         | 44.44%      | 1.02              | 25.0%     | Present but not converting           |
-| Cortina Sliding Centre              | 73.33%      | 1.01              | 30.91%    | Volume leader, moderate gold rate    |
+| Tofane Alpine Skiing Centre             | 44.44%      | 1.02              | 25.0%     | Present but not converting           |
+| Cortina Sliding Centre                  | 73.33%      | 1.01              | 30.91%    | Volume leader, moderate gold rate    |
 
 Table 3 – Alpine states performance
 
-Several environments showed a complete absence of local or regional bias, leaving international fields to dominate the
-podium tallies (Table 4). Across nearly every freestyle discipline, international teams captured between 73.33% and
-100.0% of the medals. The "Other Countries" swept 79.10% of the medals at Cortina Curling Olympic Stadium, showing that
-specialized stadium sheet ice remains universally neutral. International teams dominated Tesero Cross-Country Skiing
-Stadium as well,
-taking 70.83% of the podium spots (51 medals) and achieving a 47.06% Gold Rate, keeping both Italy and the
-Alpine States significantly below performance baselines.
+Several venues exhibit minimal regional bias, with medal distribution strongly favoring Other Countries. These
+environments are primarily freestyle and indoor disciplines, where environmental familiarity plays a reduced role and
+technical specialization dominates outcomes.
 
-| Venue                                   | Other Countries Medal Share |
-|:----------------------------------------|-----------------------------|
-| Livigno Snow Park-Halfpipe              | 100.00% (12 Medals)         |
-| Livigno Aerials & Moguls Park-Moguls    | 94.44% (17 Medals)          |
-| Milano Santagiulia Ice Hockey Arena     | 79.37% (177 Medals)         |
-| Cortina Curling Olympic Stadium-Sheet C | 79.10% (53 Medals)          |
-| Milano Ice Skating Arena-Competitio     | 74.76% (77 Medals)          |
+Freestyle snow events in particular show near-total dominance by international competitors, while curling and
+cross-country skiing also demonstrate strong non-regional performance concentration.
+
+|                        Venue                       | Medal Share | Performance Index | Gold Rate |              Notes              |
+|:--------------------------------------------------:|:-----------:|:-----------------:|:---------:|:-------------------------------:|
+| Livigno Snow Park-Halfpipe                         | 100.00%     | 1.0               | 33.33%    |   Zero Alpine states presence   |
+| Livigno Aerials & Moguls Park-Moguls & Dual Moguls | 94.44%      | 1.08              | 35.29%    |      Near-total dominance       |
+| Milano Santagiulia Ice Hockey Arena                | 79.37%      | 0.93              | 42.94%    |  High volume, strong gold rate  |
+| Cortina Curling Olympic Stadium-Sheet C            | 79.10%      | 0.98              | 26.42%    | Specialized ice, neutral ground |
+| Milano Ice Skating Arena-Competition Rink          | 74.76%      | 1.02              | 36.36%    |   Consistent podium presence    |
 
 Table 4 – Other Countries performance
 
-### Query 3 results
+#### Key Insights
 
-The dataset maps which nations control specific athletic venues based on their total medal yields, using the absolute
-count of physical medals awarded. Because this methodology counts
-every individual medal handed out, team and large-group disciplines skew significantly higher in total volume than
-individual events. A clear trend emerges
-showing that while massive arena-based sports (such as Ice Hockey or Curling) produce a singular, high-volume "Sole
-Leader", technical outdoor events (like Ski Jumping and Ski Mountaineering) are highly prone to multi-nation competitive
-ties.
-The query identifies "Sole Leaders" versus "Tied" nations across three event types: TEAM (multi-athlete squads), DGRP (
-Direct Group/Relay/Pairs), and INDV (Individual competitions).
+- **No uniform host-nation advantage:** Italy’s performance is uneven across venues, with overperformance limited to a
+  small subset of locations. This indicates that home advantage is not systematic but highly context-dependent.
+
+- **Regional consistency effect (Alpine States):** Alpine States demonstrate more stable overperformance across multiple
+  venues, particularly in snow and mountain disciplines. This suggests that geographical and environmental familiarity
+  is a stronger determinant than host status alone.
+
+- **Discipline-dependent performance structure:** Technically demanding outdoor events (e.g., alpine skiing, biathlon,
+  sliding) show stronger regional clustering effects, while indoor or freestyle events show weaker geographic bias.
+
+- **Clear separation between efficiency and dominance:** Some venues (e.g., ice hockey arena) show high medal volume
+  without gold conversion, indicating that participation intensity does not necessarily translate into competitive
+  dominance.
+
+- **Neutralization in freestyle disciplines:** Freestyle snow events and selected indoor competitions show minimal
+  regional advantage, with medal distribution driven more by program strength than geography.
+
+### QUERY 3 – Top Performing Country per Venue
+
+#### Query Design and Logic
+
+This query identifies the country achieving the highest total medal count at each competition venue and distinguishes
+between sole dominance and shared leadership outcomes.
+
+The implementation follows three aggregation stages:
+
+- **medals_per_location CTE**: Aggregates total medals by venue, country, and event type. Each medal is weighted
+  equally,
+  representing total podium presence rather than medal color or event prestige.
+
+- **countries_rank CTE**: Applies `DENSE_RANK()` partitioned by venue and ordered by total medals in descending order.
+  Countries with identical totals share the same rank, ensuring that tied leaders are preserved without rank gaps.
+
+- **top_countries CTE**: Filters for rank = 1, retaining all countries jointly leading a venue. This step explicitly
+  captures competitive ties rather than forcing single-winner selection.
+
+The final output computes a leadership status flag, defined using `COUNT(*) OVER (PARTITION BY venue)`. Venues with
+more than one top-ranked country are labeled as 'Tied', while single-country leaders are labeled as 'Sole Leader'.
+Results are ordered by event type and total medals to distinguish structural differences between competition formats.
+
+#### Results and Interpretation
+
+The analysis highlights how venue leadership patterns vary significantly depending on sport structure and team size. A
+clear distinction emerges between high-volume team sports, balanced group competitions, and individually dominated
+disciplines.
+
+At a structural level, team sports exhibit strong concentration effects due to large roster sizes, producing clear
+single-country dominance at several venues. Ice hockey and curling, in particular, generate the highest medal volumes
+per nation due to cumulative team participation across multiple matches.
 
 **High-Volume Team Sports**
-: Canada stands as the Sole Leader at Milano Santagiulia Ice Hockey Arena. The count of 76 physical medals highlights
-the
-compounding effect of large roster sizes across multiple team categories.
-Finland claims the Sole Leader status at Cortina Curling Olympic Stadium-Sheet C. While curling
-rosters are smaller than hockey squads, the physical count reflects multiple team members over the duration of the
-tournament sheets. The only exception is ski mountaineering at Stelvio — a low-volume, emerging Olympic discipline where
-the medal pool is
-too shallow to produce a clear national leader. (Table 5)
+Canada dominates the ice hockey tournament at Milano Santagiulia, accumulating 76 physical medals and representing the
+clearest example of roster-driven dominance. Finland achieves similar sole-leader status in curling, though at a lower
+absolute volume. Other team-oriented venues, such as biathlon and sliding, also show single-country leadership patterns.
+In contrast, ski mountaineering at Stelvio demonstrates a three-way tie, reflecting a limited medal pool and higher
+competitive dispersion.
 
 |                Venue                |            Country           | Medals |   Leadership  |
 |:-----------------------------------:|:----------------------------:|:------:|:-------------:|
@@ -273,20 +354,15 @@ too shallow to produce a clear national leader. (Table 5)
 Table 5 – Team events medals distribution
 
 **Group and Pair Competitions**
-:   This category encompasses pairs, duos, and specialized group scoring systems where multiple athletes stand on the
-podium together.
-
-Milano Ice Skating Arena-Competition Rink (Italy – 21 Medals): The host nation emerged as a Sole Leader with a
-commanding 21 physical medals. This high volume points to dominant roster depth in short track relays or figure skating
-team/pair events.
-
-Predazzo Ski Jumping-Normal Hill (Slovenia, Norway, Japan – 4 Medals each): This venue demonstrates a clear competitive
-equilibrium, resulting in a three-way Tied leadership status. Each nation walked away with four physical medals,
-indicating
-a dead heat in team-based hill events.
-
 Predazzo Ski Jumping-Large Hill (Poland, Austria, Norway – 2 Medals each): Similarly, the large hill features a
 three-way tie under the DGRP type, with two physical medals awarded per leading country.
+
+Group-based disciplines (pairs, relays, and synchronized events) show more balanced competitive outcomes, with both sole
+dominance and multi-country ties depending on event structure.
+
+The Milano Ice Skating Arena is dominated by Italy with 21 medals, reflecting strong depth in paired and team-based
+skating disciplines. In contrast, ski jumping events at Predazzo demonstrate perfect competitive equilibrium, with
+multiple nations sharing identical medal totals and no clear dominance emerging.
 
 |                   Venue                   |          Country          | Medals |   Leadership  |
 |:-----------------------------------------:|:-------------------------:|:------:|:-------------:|
@@ -297,19 +373,13 @@ three-way tie under the DGRP type, with two physical medals awarded per leading 
 Table 6 – Group and pair events medals distribution
 
 **Individual Competitions**
-: Individual disciplines produce the most geographically diverse leaderboard. Traditional powerhouses hold their
-historic disciplines — Norway in cross-country, Netherlands in speed skating, Switzerland in alpine — while Japan
-emerges as an unexpected multi-venue leader across freestyle snow disciplines.
+Individual disciplines produce the most geographically diverse leadership structure, with dominance distributed across
+multiple traditional sporting powerhouses. Unlike team-based events, leadership is less concentrated and more
+discipline-specific.
 
-Norway asserts its classic endurance hegemony as the Sole Leader, accumulating 13 individual physical medals across
-various distances. The Dutch speed skating contingent completely controlled the
-Milano Speed Skating Stadium, capturing 12 individual medals to take Sole Leader status. Switzerland used its alpine
-familiarity to lock down 6 individual medals, standing alone at the top of the Stelvio Ski Centre-Alpine Skiing Course
-leaderboard.
-
-Japan's three freestyle wins at Livigno (halfpipe, big air, slopestyle) is the standout pattern. These victories
-represent a consistent Japanese program that travels to European venues and
-wins regardless of geography.
+Norway leads endurance-based cross-country skiing, while the Netherlands dominates speed skating. Switzerland maintains
+control in alpine skiing events, reflecting terrain familiarity and historical specialization. Meanwhile, Japan emerges
+as a consistent leader across freestyle snow disciplines, indicating strong performance portability across venues.
 
 |                        Venue                       |    Country    | Medals |  Leadership |
 |:--------------------------------------------------:|:-------------:|:------:|:-----------:|
@@ -324,18 +394,145 @@ wins regardless of geography.
 
 Table 7 – Individual competition events medals distribution
 
-## Project Summary
+#### Key Insights
 
-The 2026 Winter Olympics schedule was engineered for impact — 80% of sessions reserved for build-up, with medal moments
-concentrated when audiences peaked — but the host nation Italy captured only a fraction of the advantage that implied.
-Genuine home edges appeared at just three venues: Tofane Alpine Skiing Centre, where Italy converted two-thirds of its
-medals to gold, Cortina Sliding Centre, and Livigno Cross. Elsewhere, the Alpine neighborhood proved the more consistent
-beneficiary, with Switzerland, Austria, France, and Germany collectively outperforming their participation share across
-biathlon, alpine skiing, and sliding — disciplines where years of regional training proximity matter more than a flag on
-the scoreboard. That regional logic collapsed entirely in the freestyle disciplines, where Japan won halfpipe, big air,
-and slopestyle at Livigno, the United States took moguls, and China claimed aerials — programs built on pipelines that
-no host advantage can touch. Norway assembled quiet dominance in cross-country, the Netherlands controlled speed
-skating, and Canada closed the story with the single loudest statement of the Games: 76 medals at the ice hockey arena,
-a number so large it distorts any aggregate table that includes it. Milan-Cortina 2026 was not Italy's Games — it was
-the Alps' Games, contested on neutral ground wherever snow gave way to ice, and punctuated by Canada reminding everyone
-that team sports write their own rules.
+- **Leadership is structurally driven, not purely competitive:** Venue dominance patterns are strongly influenced by
+  event format (TEAM vs DGRP vs INDV) rather than geography alone.
+
+- **Team size amplifies dominance effects:** High-roster sports (e.g., ice hockey, curling) generate concentrated “Sole
+  Leader” outcomes due to cumulative medal counts per athlete, producing structural rather than performance-based
+  dominance.
+
+- **Higher incidence of ties in technical disciplines:** Events with smaller competitive margins (e.g., ski jumping,
+  mountaineering) frequently result in shared leadership, indicating tighter competitive parity.
+
+- **Clear separation between dominance types:**
+    - TEAM events → high-volume single-nation dominance
+    - DGRP events → mixed dominance and frequent ties
+    - INDV events → distributed leadership across multiple nations
+
+- **Discipline specialization drives individual success:** Individual competitions are characterized by country-specific
+  specialization (e.g., endurance, speed skating, alpine), producing stable but siloed dominance patterns.
+
+- **Freestyle disciplines show cross-national portability:** In contrast to geographically constrained events, freestyle
+  snow disciplines exhibit transferable performance across venues, with multiple countries achieving isolated dominance
+  in different sub-events.
+
+## 5. Discussion of Findings
+
+### Key Patterns Across Queries
+
+Across all three queries, three consistent structural patterns emerge.
+
+First, scheduling and performance are both highly unevenly distributed. Query 1 shows strong temporal clustering of
+medal events in later time slots, while Queries 2 and 3 show spatial clustering of performance in specific venues rather
+than uniform distribution across locations.
+
+Second, competitive outcomes are strongly shaped by structure rather than randomness. Venue characteristics, event type,
+and participation scale all systematically influence medal distribution patterns.
+
+Third, dominance is rarely absolute. Instead, most patterns reflect conditional advantage—either by region, discipline
+type, or competition format.
+
+### Host Nation vs Regional Advantage
+
+The results do not support a uniform host nation advantage. Italy shows selective overperformance at specific venues but
+also clear underperformance in others, indicating that home advantage is localized rather than systemic.
+
+In contrast, Alpine States exhibit more consistent overperformance across multiple venues and disciplines, particularly
+in technically demanding winter sports. This suggests that environmental familiarity and regional training ecosystems
+are more influential than host status alone.
+
+Overall, the evidence supports a regional advantage model rather than a pure host-nation effect.
+
+### Sport Structure Effects (Team vs Individual Bias)
+
+Sport structure is a primary driver of observed dominance patterns. Team-based events generate concentrated outcomes due
+to roster size effects, where medal counts scale with participation
+rather than competitive superiority alone. This produces artificial-looking dominance in high-volume sports such as ice
+hockey and curling.
+
+Group and pair events show more balanced distributions, frequently resulting in tied leadership due to tightly clustered
+competitive performance.
+
+Individual events produce the most geographically diverse outcomes, with dominance distributed across specialized
+national programs. Here, success is driven more by discipline-specific expertise than venue or structural amplification.
+
+Overall, competition format significantly conditions how dominance appears in the dataset, often more strongly than
+geography.
+
+## 6. Conclusion
+
+### Main Takeaways
+
+The analysis demonstrates that medal distribution and venue dominance at Milan–Cortina 2026 are primarily shaped by
+structural factors rather than uniform geographic advantage.
+
+Key findings include:
+
+- Strong temporal concentration of medal events in later time slots
+- Absence of a consistent host nation advantage
+- Stronger and more stable regional (Alpine) performance effects
+- Major influence of sport structure on perceived dominance
+
+### Limitations
+
+This analysis is based on physical medal counts rather than official Olympic medal tables, meaning team events are
+disproportionately weighted due to roster size effects.
+In addition, grouping countries into broad categories (Italy, Alpine States, Other Countries) simplifies geopolitical
+variation and may mask intra-group differences.
+Finally, performance indices are sensitive to athlete participation estimates, which may introduce bias if participation
+is unevenly distributed across events.
+
+### Final Remarks
+
+Rather than a single dominant nation or host advantage, the results indicate a multi-layered competitive system shaped
+by geography, sport structure, and event design.
+Milan–Cortina 2026 therefore appears less as a host-driven Games and more as a structurally segmented competition
+landscape, where advantage depends on context rather than nationality alone.
+
+## Appendix A – Personal Reflection on Analytical Process
+
+This was my first time working on a full structured data analysis project, and it highlighted several important aspects
+of working with real-world data.
+
+One of the biggest takeaways is that datasets are almost never ready for analysis straight away, even if they look well
+organized at first glance. In my case, the raw Olympic-style dataset had clear tables like schedules, medallists, and
+athletes, but I still had to spend a lot of time figuring out how they actually connect and understand the real meaning
+of the column's names. For example, I had to
+explicitly build the relationship between schedules and medallists using joins, and even then I had to handle issues
+like matching dates, trimming strings, and filtering only medal events. Without that step, Query 2 and Query 3 wouldn’t
+have made sense at all.
+
+Another important lesson was how much ambiguity exists in basic definitions. Things like “a medal” or “performance” are
+not actually defined in the data — you have to decide what they mean. In my report, I treated medals as physical medals
+per athlete, not just country results like in official Olympic tables. That completely changes interpretation. For
+example, in Query 3, team sports like ice hockey produced extremely high medal counts (like Canada’s 76 medals), not
+because they were necessarily “better”, but because each athlete receives a medal. If I had used the official country
+medal logic instead, the results would have looked totally different.
+
+The same issue shows up in the “performance index” from Query 2. I had to decide what “performance” means in this
+analysis. I
+defined it as a ratio between expected medals (based on participation) and actual medals. But that’s just one possible
+interpretation — I could have weighted gold medals more heavily, or normalized differently, and the story would change.
+So the results are not just “facts,” they are tied to design choices I made.
+
+I also realized that writing SQL queries is basically the same as forming hypotheses. Every query is really just a
+question about how I think the system works. For example, in Query 1 I assumed time slots (morning, afternoon, evening)
+would reveal something meaningful about scheduling strategy — and that assumption shaped how I built the grouping logic.
+If I had framed the question differently, I would have gotten a completely different view of the same data.
+
+Another thing that became clear is how much the structure of the data affects the final conclusions. Whether I group by
+country, venue, or athlete completely changes the story. In Query 2, grouping countries into Italy, Alpine States, and
+Other Countries helped reveal clear regional patterns in performance. But if I had broken “Other Countries” into smaller
+subgroups, the results might have highlighted very different dynamics between specific nations instead of a broad
+regional effect. So the insight is not just in the data itself, but in how it is structured and aggregated.
+
+Finally, the whole process was very iterative. I didn’t get the “final” version of the analysis in one go. I kept going
+back to adjust joins, fix inconsistencies in naming, and rethink how I was categorizing things like medal sessions vs
+non-medal sessions. A lot of the structure in Query 1, especially the time-slot breakdown, only made sense after I had
+already explored the raw distribution of sessions a few times.
+
+Overall, the main thing I learned is that data analysis is not just about running queries. It’s about deciding what
+questions are actually meaningful, understanding what the data really represents, and being aware that small design
+choices can completely change the story you end up telling.
