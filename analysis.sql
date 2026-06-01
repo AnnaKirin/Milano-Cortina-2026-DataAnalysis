@@ -1,5 +1,5 @@
 SET
-variable DATA_DIR = '/Users/anitak/Documents/Uniwerek/TSM_DtMgmt/Milano-Cortina/data/';
+variable DATA_DIR = './data/';
 
 -- ==========================================
 -- LOAD SCHEDULES DATA

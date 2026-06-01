@@ -1,5 +1,7 @@
 # Milano-Cortina 2026 Olympic Winter Games: Data Analysis & Insights
+
 This document is licensed under CC BY 4.0.
+
 ## Table of Contents
 
 <!-- TOC -->
@@ -45,8 +47,15 @@ This analysis explores the structural, logistical, and competitive patterns of t
 Games. The goal is not just to describe outcomes, but to understand how scheduling decisions, venue distribution, and
 competition formats shape the final medal landscape.
 
-The dataset is processed using DuckDB as the core analytical engine. A full ETL pipeline is implemented to clean,
-standardize, and connect relational data across event schedules, athlete information, and medal results.
+The analysis was implemented entirely in SQL using the DuckDB analytical database engine. The raw data was sourced from
+a public Kaggle dataset containing structured information about the Milano–Cortina 2026 Olympic Winter Games, including
+schedules, athletes, medal results, venues, and event metadata.
+
+The original dataset consists of six CSV files:
+`schedules.csv`, `medallists.csv`, `athletes.csv`, `medals.csv`, `venues.csv`, and `teams.csv`.
+
+Original dataset source:
+[https://www.kaggle.com/datasets/piterfm/milano-cortina-2026-olympic-winter-games/data?select=medallists.csv](https://www.kaggle.com/datasets/piterfm/milano-cortina-2026-olympic-winter-games/data?select=medallists.csv)
 
 The analysis focuses on three main perspectives:
 
@@ -78,10 +87,9 @@ duckdb < analysis.sql
 
 ### Data selection and analytical assumptions
 
-Analyzed the raw CSV data files to assess their structure and selected the target source tables required for the
-schema development. While the primary dataset comprised six source files, this specific investigation targets the three
-relations:
-`schedules.csv`, `medallists.csv`, and `athletes.csv`.
+The raw CSV data files were first analyzed to assess their structure and determine which source tables were relevant for
+the analytical schema. This investigation focuses on three core relations: `schedules.csv`, `medallists.csv`, and
+`athletes.csv`.
 
 This analysis compares the total number of physical medals awarded per athlete and per country. For instance, if the
 Polish men's volleyball team wins gold, each of the 12 players receives a physical
@@ -110,9 +118,8 @@ these results cannot be compared with the data contained in the medals.csv file.
 
 ### Data Cleansing
 
-The first optimization creates the schedules_cleaned view. A view was chosen over a temporary table because it
-provides dynamic, real-time access to the most up-to-date raw data without consuming physical storage or persisting
-across a single database session.
+The first optimization creates the schedules_cleaned view. A view was chosen instead of a temporary table because the
+cleaned data did not need to be physically stored as a separate dataset and no intermediate results need to be reused.
 
 * Time Categorization: Derives a time_slot ('Morning', 'Afternoon', 'Evening', 'Night') based on the event's start
   hour.
@@ -244,8 +251,6 @@ cross-country skiing venues dominated by non-host competitors.
 | Stelvio Ski Centre-Alpine Skiing Course | 0.67              | 0.0%      | Significant underperformance on home snow |
 |        Anterselva Biathlon Arena        | 0.75              | 20.0%     | Dominated by Alpine States                |
 |      Tesero Cross-Country Stadium       | 0.81              | 0.0%      | Other Countries take 70.83%               |
-
-
 
 Table 2 – Italy (host nation) under-performance
 
